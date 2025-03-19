@@ -1,5 +1,4 @@
-#include "matrix.h"
-#include <bits/stdc++.h>
+#include "gemm.h"
 // 矩阵加法
 inline Matrix matrixAdd(const Matrix &A, const Matrix &B)
 {
@@ -92,7 +91,7 @@ inline std::vector<Matrix> psi_opt(std::vector<Matrix> &A)
     std::vector<Matrix> result(4);
     result[0] = A[0];
     result[1] = matrixAdd(matrixSub(A[1], A[2]), A[3]);
-    result[2] = matrixSub(A[2], A[3]);
+    result[2] = matrixSub(A[3], A[2]);
     result[3] = matrixAdd(A[1], A[3]);
     return result;
 }
@@ -102,9 +101,9 @@ inline std::vector<Matrix> psi_opt_inv(std::vector<Matrix> &A)
 {
     std::vector<Matrix> result(4);
     result[0] = A[0];
-    result[1] = matrixAdd(A[1], A[2]);
+    result[1] = matrixSub(A[1], A[2]);
     result[2] = matrixSub(A[3], A[1]);
-    result[3] = matrixSub(A[3], matrixAdd(A[1], A[2]));
+    result[3] = matrixSub(matrixAdd(A[2], A[3]), A[1]);
     return result;
 }
 
@@ -271,37 +270,42 @@ Matrix wrapMultiply(const Matrix &A, const Matrix &B)
     return C;
 }
 
-int main()
-{
-    // 生成随机数引擎
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> distrib(-10, 10);
+// int main()
+// {
+//     // 生成随机数引擎
+//     std::random_device rd;
+//     std::mt19937 gen(rd());
+//     std::uniform_int_distribution<> distrib(-10, 10);
 
-    int size = 4;
-    Matrix A = generateRandomMatrix(size, [&]()
-                                    { return distrib(gen); });
-    Matrix B = generateRandomMatrix(size, [&]()
-                                    { return distrib(gen); });
+//     int size = 4;
+//     Matrix A = generateRandomMatrix(size, [&]()
+//                                     { return distrib(gen); });
+//     Matrix B = generateRandomMatrix(size, [&]()
+//                                     { return distrib(gen); });
 
-    // 打印矩阵
-    std::cout << "Matrix A:\n";
-    printMatrix(A);
-    std::cout << "\nMatrix B:\n";
-    printMatrix(B);
-    // 矩阵乘法
-    Matrix C = wrapMultiply(A, B);
-    // 打印结果
-    std::cout << "\nResultant Matrix C:\n";
-    printMatrix(C);
+//     // 打印矩阵
+//     std::cout << "Matrix A:\n";
+//     printMatrix(A);
+//     std::cout << "\nMatrix B:\n";
+//     printMatrix(B);
+//     // 矩阵乘法
+//     Matrix C = wrapMultiply(A, B);
+//     // 打印结果
+//     std::cout << "\nResultant Matrix C:\n";
+//     printMatrix(C);
 
-    // 在现有代码后增加验证
-    std::cout << "\nValidating with brute-force multiplication...";
-    Matrix C_brute = bruteForceMultiply(A, B);
-    std::cout << "\nResultant Matrix C (Brute-Force):\n";
-    printMatrix(C_brute);
+//     Matrix D = strassenMultiply(A, B);
 
-    // 比较两个算法的结果
-    std::cout << (C == C_brute ? "\nValidation PASSED" : "\nValidation FAILED") << std::endl;
-    return 0;
-}
+//     std::cout << "\nResultant Matrix D:\n";
+//     printMatrix(D);
+
+//     // 在现有代码后增加验证
+//     std::cout << "\nValidating with brute-force multiplication...";
+//     Matrix C_brute = bruteForceMultiply(A, B);
+//     std::cout << "\nResultant Matrix C (Brute-Force):\n";
+//     printMatrix(C_brute);
+
+//     // 比较两个算法的结果
+//     std::cout << (C == C_brute ? "\nValidation PASSED" : "\nValidation FAILED") << std::endl;
+//     return 0;
+// }
