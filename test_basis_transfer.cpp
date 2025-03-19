@@ -23,13 +23,13 @@ int main()
 
     // 进行矩阵乘法
     Matrix C = bruteForceMultiply(A, B);
-    Matrix C_Strassen = wrapMultiply(A, B);
+    Matrix C_AB = wrapMultiply(A, B);
 
     // 打印结果
     std::cout << "Result of matrix multiplication:" << std::endl;
     printMatrix(C);
     std::cout << "Result of AB matrix multiplication:" << std::endl;
-    printMatrix(C_Strassen);
+    printMatrix(C_AB);
 
     return 0;
 }
