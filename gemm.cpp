@@ -187,7 +187,7 @@ Matrix bruteForceMultiply(const Matrix &A, const Matrix &B)
     return res;
 }
 
-Matrix strassenMultiply(const Matrix &A, const Matrix &B)
+Matrix ABMultiply(const Matrix &A, const Matrix &B)
 {
     int n = A.size();
     if (n == 1)
@@ -237,7 +237,7 @@ Matrix strassenMultiply(const Matrix &A, const Matrix &B)
     std::vector<Matrix> M(8);
     for (int i = 0; i < 7; i++)
     {
-        M[i] = strassenMultiply(S[i], T[i]);
+        M[i] = ABMultiply(S[i], T[i]);
     }
 
     // 计算U
@@ -263,49 +263,9 @@ Matrix wrapMultiply(const Matrix &A, const Matrix &B)
     Matrix A_phi = basis_transformation(A, depth);
     Matrix B_phi = basis_transformation(B, depth);
     // multiply
-    Matrix C_phi = strassenMultiply(A_phi, B_phi);
+    Matrix C_phi = ABMultiply(A_phi, B_phi);
     // psi inverse transformation
     Matrix C = inverse_basis_transformation(C_phi, depth);
 
     return C;
 }
-
-// int main()
-// {
-//     // 生成随机数引擎
-//     std::random_device rd;
-//     std::mt19937 gen(rd());
-//     std::uniform_int_distribution<> distrib(-10, 10);
-
-//     int size = 4;
-//     Matrix A = generateRandomMatrix(size, [&]()
-//                                     { return distrib(gen); });
-//     Matrix B = generateRandomMatrix(size, [&]()
-//                                     { return distrib(gen); });
-
-//     // 打印矩阵
-//     std::cout << "Matrix A:\n";
-//     printMatrix(A);
-//     std::cout << "\nMatrix B:\n";
-//     printMatrix(B);
-//     // 矩阵乘法
-//     Matrix C = wrapMultiply(A, B);
-//     // 打印结果
-//     std::cout << "\nResultant Matrix C:\n";
-//     printMatrix(C);
-
-//     Matrix D = strassenMultiply(A, B);
-
-//     std::cout << "\nResultant Matrix D:\n";
-//     printMatrix(D);
-
-//     // 在现有代码后增加验证
-//     std::cout << "\nValidating with brute-force multiplication...";
-//     Matrix C_brute = bruteForceMultiply(A, B);
-//     std::cout << "\nResultant Matrix C (Brute-Force):\n";
-//     printMatrix(C_brute);
-
-//     // 比较两个算法的结果
-//     std::cout << (C == C_brute ? "\nValidation PASSED" : "\nValidation FAILED") << std::endl;
-//     return 0;
-// }
