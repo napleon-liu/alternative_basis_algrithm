@@ -1,271 +1,563 @@
-#include "gemm.h"
-// 矩阵加法
-inline Matrix matrixAdd(const Matrix &A, const Matrix &B)
+#include <iostream>
+#include <cstring>
+#include <stdlib.h>
+#include <math.h>
+#include <chrono>
+constexpr int BASE_SIZE = 2;
+
+#define BASE_SIZE 2
+#define MAX_SIZE 8
+#define EPSILON 1e-6
+
+using namespace std;
+
+void print_matrix(double *A, int stride, int M, int N)
 {
-    int n = A.size();
-    Matrix res(n, vector<double>(n));
-    for (int i = 0; i < n; ++i)
-        for (int j = 0; j < n; ++j)
-            res[i][j] = A[i][j] + B[i][j];
-    return res;
+    for (int i = 0; i < M; ++i)
+    {
+        for (int j = 0; j < N; ++j)
+        {
+            printf("%6.2f ", A[i * stride + j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
 }
 
-// 矩阵减法
-inline Matrix matrixSub(const Matrix &A, const Matrix &B)
+// ---- 非递归基变换（叶子调用）----
+void basis_transformation(double *A[4], double *C[4], int strideA, int strideC, int M, int N)
 {
-    int n = A.size();
-    Matrix res(n, vector<double>(n));
-    for (int i = 0; i < n; ++i)
-        for (int j = 0; j < n; ++j)
-            res[i][j] = A[i][j] - B[i][j];
-    return res;
+    int halfM = M / 2;
+    int halfN = N / 2;
+    // std::cout << "basis_transformation start:" << std::endl;
+    for (int i = 0; i < halfM; ++i)
+    {
+        for (int j = 0; j < halfN; ++j)
+        {
+            int idx = i * strideA + j;
+
+            double a0 = A[0][idx];
+            double a1 = A[1][idx];
+            double a2 = A[2][idx];
+            double a3 = A[3][idx];
+
+            C[0][idx] = a0;
+            C[1][idx] = a1 - a2 + a3;
+            C[2][idx] = a3 - a2;
+            C[3][idx] = a1 + a3;
+        }
+    }
+    // std::cout << "basis_transformation result:" << std::endl;
+    // for (int k = 0; k < 4; ++k)
+    // {
+    //     std::cout << "Block " << k << ":" << std::endl;
+    //     for (int i = 0; i < halfM; ++i)
+    //     {
+    //         for (int j = 0; j < halfN; ++j)
+    //         {
+    //             int idx = i * strideC + j;
+    //             std::cout << C[k][idx] << " ";
+    //         }
+    //         std::cout << std::endl;
+    //     }
+    // }
 }
 
-// 标量乘矩阵
-inline Matrix scalarMult(int scalar, const Matrix &A)
+// ---- 非递归基变换（叶子调用）----
+void inv_basis_transformation(double *A[4], double *C[4], int strideA, int strideC, int M, int N)
 {
-    int n = A.size();
-    Matrix res(n, vector<double>(n));
-    for (int i = 0; i < n; ++i)
-        for (int j = 0; j < n; ++j)
-            res[i][j] = scalar * A[i][j];
-    return res;
+    int halfM = M / 2;
+    int halfN = N / 2;
+    // std::cout << "inv_basis_transformation start:" << std::endl;
+    for (int i = 0; i < halfM; ++i)
+    {
+        for (int j = 0; j < halfN; ++j)
+        {
+            int idx = i * strideA + j;
+
+            double a0 = A[0][idx];
+            double a1 = A[1][idx];
+            double a2 = A[2][idx];
+            double a3 = A[3][idx];
+
+            C[0][idx] = a0;
+            C[1][idx] = a1 - a2;
+            C[2][idx] = a3 - a1;
+            C[3][idx] = a2 + a3 - a1;
+        }
+    }
+    // std::cout << "inv_basis_transformation result:" << std::endl;
+    // for (int k = 0; k < 4; ++k)
+    // {
+    //     std::cout << "Block " << k << ":" << std::endl;
+    //     for (int i = 0; i < halfM; ++i)
+    //     {
+    //         for (int j = 0; j < halfN; ++j)
+    //         {
+    //             int idx = i * strideC + j;
+    //             std::cout << C[k][idx] << " ";
+    //         }
+    //         std::cout << std::endl;
+    //     }
+    // }
 }
 
-// 基例：小矩阵乘法（假设基例为 2x2 矩阵）
-inline Matrix baseMult(const Matrix &A, const Matrix &B)
+// ---- 分块函数 ----
+void split_block(double *block, double *sub[4], int stride, int M, int N)
 {
-    Matrix res(2, vector<double>(2));
-    res[0][0] = A[0][0] * B[0][0] + A[0][1] * B[1][0];
-    res[0][1] = A[0][0] * B[0][1] + A[0][1] * B[1][1];
-    res[1][0] = A[1][0] * B[0][0] + A[1][1] * B[1][0];
-    res[1][1] = A[1][0] * B[0][1] + A[1][1] * B[1][1];
-    return res;
+    int halfM = M / 2;
+    int halfN = N / 2;
+    sub[0] = block;                          // 左上
+    sub[1] = block + halfN;                  // 右上
+    sub[2] = block + halfM * stride;         // 左下
+    sub[3] = block + halfM * stride + halfN; // 右下
+    // std::cout << "split_block result:" << std::endl;
+    // for (int k = 0; k < 4; ++k)
+    // {
+    //     std::cout << "Block " << k << ":" << std::endl;
+    //     for (int i = 0; i < halfM; ++i)
+    //     {
+    //         for (int j = 0; j < halfN; ++j)
+    //         {
+    //             int idx = i * stride + j;
+    //             std::cout << sub[k][idx] << " ";
+    //         }
+    //         std::cout << std::endl;
+    //     }
+    // }
 }
 
-// 分块函数（假设矩阵是 2 的幂次）
-inline vector<Matrix> splitMatrix(const Matrix &A)
+void recursive_basis_transform(double *A[4], double *C[4], int strideA, int strideC, int M, int N)
 {
-    int n = A.size();
-    int newSize = n / 2;
-    vector<Matrix> blocks(4);
+    if (M <= BASE_SIZE || N <= BASE_SIZE)
+    {
+        basis_transformation(A, C, strideA, strideC, M, N);
+        return;
+    }
+
+    int halfM = M / 2;
+    int halfN = N / 2;
+
+    double *A_sub[4][4], *C_sub[4][4];
+
     for (int i = 0; i < 4; ++i)
-        blocks[i] = Matrix(newSize, vector<double>(newSize));
-
-    for (int i = 0; i < newSize; ++i)
     {
-        for (int j = 0; j < newSize; ++j)
-        {
-            blocks[0][i][j] = A[i][j];                     // 左上块
-            blocks[1][i][j] = A[i][j + newSize];           // 右上块
-            blocks[2][i][j] = A[i + newSize][j];           // 左下块
-            blocks[3][i][j] = A[i + newSize][j + newSize]; // 右下块
-        }
+        split_block(A[i], A_sub[i], strideA, halfM, halfN);
+        split_block(C[i], C_sub[i], strideC, halfM, halfN);
     }
-    return blocks;
+
+    for (int i = 0; i < 4; ++i)
+    {
+        recursive_basis_transform(A_sub[i], C_sub[i], strideA, strideC, halfM, halfN);
+    }
+
+    basis_transformation(C, C, strideC, strideC, M, N);
 }
 
-// 合并分块矩阵
-inline Matrix mergeMatrix(const vector<Matrix> &blocks)
+void inv_recursive_basis_transform(double *A[4], double *C[4], int strideA, int strideC, int M, int N)
 {
-    int n = blocks[0].size() * 2;
-    Matrix res(n, vector<double>(n));
-    int newSize = n / 2;
-
-    for (int i = 0; i < newSize; ++i)
+    if (M <= BASE_SIZE || N <= BASE_SIZE)
     {
-        for (int j = 0; j < newSize; ++j)
-        {
-            res[i][j] = blocks[0][i][j];
-            res[i][j + newSize] = blocks[1][i][j];
-            res[i + newSize][j] = blocks[2][i][j];
-            res[i + newSize][j + newSize] = blocks[3][i][j];
-        }
+        inv_basis_transformation(A, C, strideA, strideC, M, N);
+        return;
     }
-    return res;
+
+    int halfM = M / 2;
+    int halfN = N / 2;
+
+    double *A_sub[4][4], *C_sub[4][4];
+
+    for (int i = 0; i < 4; ++i)
+    {
+        split_block(A[i], A_sub[i], strideA, halfM, halfN);
+        split_block(C[i], C_sub[i], strideC, halfM, halfN);
+    }
+
+    for (int i = 0; i < 4; ++i)
+    {
+        inv_recursive_basis_transform(A_sub[i], C_sub[i], strideA, strideC, halfM, halfN);
+    }
+
+    inv_basis_transformation(C, C, strideC, strideC, M, N);
 }
 
-// 基变换
-inline std::vector<Matrix> psi_opt(std::vector<Matrix> &A)
+void matrix_add(double *A, double *B, double *C, int strideA, int strideB, int strideC, int n)
 {
-    std::vector<Matrix> result(4);
-    result[0] = A[0];
-    result[1] = matrixAdd(matrixSub(A[1], A[2]), A[3]);
-    result[2] = matrixSub(A[3], A[2]);
-    result[3] = matrixAdd(A[1], A[3]);
-    return result;
-}
-
-// 逆基变换
-inline std::vector<Matrix> psi_opt_inv(std::vector<Matrix> &A)
-{
-    std::vector<Matrix> result(4);
-    result[0] = A[0];
-    result[1] = matrixSub(A[1], A[2]);
-    result[2] = matrixSub(A[3], A[1]);
-    result[3] = matrixSub(matrixAdd(A[2], A[3]), A[1]);
-    return result;
-}
-
-// 递归进行基变换
-Matrix basis_transformation(const Matrix &A, int depth)
-{
-    if (depth == 0)
-    {
-        return A;
-    }
-    // 分块，分成四块
-    std::vector<Matrix> blocks = splitMatrix(A);
-    std::vector<Matrix> transformed_blocks;
-    for (const auto &block : blocks)
-    {
-        transformed_blocks.push_back(basis_transformation(block, depth - 1));
-    }
-    transformed_blocks = psi_opt(transformed_blocks);
-    Matrix merged = mergeMatrix(transformed_blocks);
-    return merged;
-}
-
-// 递归进行逆基变换
-Matrix inverse_basis_transformation(const Matrix &A, int depth)
-{
-    if (depth == 0)
-    {
-        return A;
-    }
-    std::vector<Matrix> blocks = splitMatrix(A);
-    std::vector<Matrix> transformed_blocks;
-    for (const auto &block : blocks)
-    {
-        transformed_blocks.push_back(inverse_basis_transformation(block, depth - 1));
-    }
-    transformed_blocks = psi_opt_inv(transformed_blocks);
-    Matrix merged = mergeMatrix(transformed_blocks);
-    return merged;
-}
-
-// 新增辅助函数
-Matrix generateRandomMatrix(int size, std::function<int()> generator)
-{
-    Matrix mat(size, std::vector<double>(size));
-    for (auto &row : mat)
-    {
-        for (auto &elem : row)
-        {
-            elem = generator();
-        }
-    }
-    return mat;
-}
-
-void printMatrix(const Matrix &mat)
-{
-    for (const auto &row : mat)
-    {
-        for (const auto &elem : row)
-        {
-            std::cout << std::setw(6) << elem << " ";
-        }
-        std::cout << "\n";
-    }
-}
-// 暴力矩阵乘法（标准三重循环实现），用于对比
-Matrix bruteForceMultiply(const Matrix &A, const Matrix &B)
-{
-    int n = A.size();
-    Matrix res(n, vector<double>(n, 0.0));
+    // std::cout << "matrix_add start:" << std::endl;
     for (int i = 0; i < n; ++i)
-    {
+        for (int j = 0; j < n; ++j)
+            C[i * strideC + j] = A[i * strideA + j] + B[i * strideB + j];
+    // std::cout << "matrix_add result:" << std::endl;
+    //     for (int i = 0; i < n; ++i)
+    //     {
+    //         for (int j = 0; j < n; ++j)
+    //         {
+    //             std::cout << C[i * strideC + j] << " ";
+    //         }
+    //         std::cout << std::endl;
+    //     }
+}
+
+void matrix_sub(double *A, double *B, double *C, int strideA, int strideB, int strideC, int n)
+{
+    // std::cout << "matrix_sub start:" << std::endl;
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+            C[i * strideC + j] = A[i * strideA + j] - B[i * strideB + j];
+    // std::cout << "matrix_sub result:" << std::endl;
+    // for (int i = 0; i < n; ++i)
+    // {
+    //     for (int j = 0; j < n; ++j)
+    //     {
+    //         std::cout << C[i * strideC + j] << " ";
+    //     }
+    //     std::cout << std::endl;
+    // }
+}
+
+void naive_mul(double *A, double *B, double *C, int strideA, int strideB, int strideC, int n)
+{
+    // std::cout << "naive_mul start:" << std::endl;
+    for (int i = 0; i < n; ++i)
         for (int j = 0; j < n; ++j)
         {
+            C[i * strideC + j] = 0;
             for (int k = 0; k < n; ++k)
-            {
-                res[i][j] += A[i][k] * B[k][j];
-            }
+                C[i * strideC + j] += A[i * strideA + k] * B[k * strideB + j];
+        }
+    // std::cout << "naive_mul result:" << std::endl;
+    // for (int i = 0; i < n; ++i)
+    // {
+    //     for (int j = 0; j < n; ++j)
+    //     {
+    //         std::cout << C[i * strideC + j] << " ";
+    //     }
+    //     std::cout << std::endl;
+    // }
+}
+
+void ABMultiply(double *A, double *B, double *C, int strideA, int strideB, int strideC, int n)
+{
+    if (n < 2)
+    {
+        C[0] = A[0] * B[0];
+        // cout << "ABMultiply (n=" << n << ") result: " << C[0] << endl;
+        return;
+    }
+
+    int half = n / 2;
+
+    // 定义子块指针（考虑stride）
+    double *A11 = A;                         // 左上块: A[0..half-1][0..half-1]
+    double *A12 = A + 0 * strideA + half;    // 右上块: A[0..half-1][half..n-1]
+    double *A21 = A + half * strideA + 0;    // 左下块: A[half..n-1][0..half-1]
+    double *A22 = A + half * strideA + half; // 右下块: A[half..n-1][half..n-1]
+
+    double *B11 = B;                         // 左上块: B[0..half-1][0..half-1]
+    double *B12 = B + 0 * strideB + half;    // 右上块: B[0..half-1][half..n-1]
+    double *B21 = B + half * strideB + 0;    // 左下块: B[half..n-1][0..half-1]
+    double *B22 = B + half * strideB + half; // 右下块: B[half..n-1][half..n-1]
+
+    double *C11 = C;                         // 结果左上块
+    double *C12 = C + 0 * strideC + half;    // 结果右上块
+    double *C21 = C + half * strideC + 0;    // 结果左下块
+    double *C22 = C + half * strideC + half; // 结果右下块
+
+    // 临时矩阵（half x half，一维存储）
+    double S[7][half * half], T[7][half * half], M[7][half * half], U[4][half * half];
+
+    // ------------------- 构建 S 矩阵（手动处理stride）-------------------
+    // S[0] = A22 (右下块)
+    for (int i = 0; i < half; ++i)
+    {
+        for (int j = 0; j < half; ++j)
+        {
+            S[0][i * half + j] = A22[i * strideA + j]; // A22的stride等于原矩阵strideA
         }
     }
-    return res;
-}
-
-Matrix ABMultiply(const Matrix &A, const Matrix &B)
-{
-    int n = A.size();
-    if (n == 1)
+    // S[1] = A21 (左下块)
+    for (int i = 0; i < half; ++i)
     {
-        Matrix res(1, vector<double>(1));
-        res[0][0] = A[0][0] * B[0][0];
-        return res;
+        for (int j = 0; j < half; ++j)
+        {
+            S[1][i * half + j] = A21[i * strideA + j];
+        }
+    }
+    // S[2] = A12 (右上块)
+    for (int i = 0; i < half; ++i)
+    {
+        for (int j = 0; j < half; ++j)
+        {
+            S[2][i * half + j] = A12[i * strideA + j];
+        }
+    }
+    // S[3] = A11 (左上块)
+    for (int i = 0; i < half; ++i)
+    {
+        for (int j = 0; j < half; ++j)
+        {
+            S[3][i * half + j] = A11[i * strideA + j];
+        }
+    }
+    // S[4] = A12 - A21
+    matrix_sub(A12, A21, S[4], strideA, strideA, half, half);
+    // S[5] = A12 - A11
+    matrix_sub(A12, A11, S[5], strideA, strideA, half, half);
+    // S[6] = A22 - A12
+    matrix_sub(A22, A12, S[6], strideA, strideA, half, half);
+
+    // 打印 S 矩阵
+    // cout << "\n=== S Matrices (n=" << n << ") ===" << endl;
+    // for (int i = 0; i < 7; ++i)
+    // {
+    //     cout << "S[" << i << "]:" << endl;
+    //     for (int row = 0; row < half; ++row)
+    //     {
+    //         for (int col = 0; col < half; ++col)
+    //         {
+    //             cout << S[i][row * half + col];
+    //         }
+    //         cout << endl;
+    //     }
+    //     cout << endl;
+    // }
+
+    // ------------------- 构建 T 矩阵（手动处理stride）-------------------
+    // T[0] = B22 (右下块)
+    for (int i = 0; i < half; ++i)
+    {
+        for (int j = 0; j < half; ++j)
+        {
+            T[0][i * half + j] = B22[i * strideB + j];
+        }
+    }
+    // T[1] = B21 (左下块)
+    for (int i = 0; i < half; ++i)
+    {
+        for (int j = 0; j < half; ++j)
+        {
+            T[1][i * half + j] = B21[i * strideB + j];
+        }
+    }
+    // T[2] = B12 (右上块)
+    for (int i = 0; i < half; ++i)
+    {
+        for (int j = 0; j < half; ++j)
+        {
+            T[2][i * half + j] = B12[i * strideB + j];
+        }
+    }
+    // T[3] = B11 (左上块)
+    for (int i = 0; i < half; ++i)
+    {
+        for (int j = 0; j < half; ++j)
+        {
+            T[3][i * half + j] = B11[i * strideB + j];
+        }
+    }
+    // T[4] = B22 - B12
+    matrix_sub(B22, B12, T[4], strideB, strideB, half, half);
+    // T[5] = B12 - B21
+    matrix_sub(B12, B21, T[5], strideB, strideB, half, half);
+    // T[6] = B12 - B11
+    matrix_sub(B12, B11, T[6], strideB, strideB, half, half);
+
+    // 打印 T 矩阵
+    // cout << "\n=== T Matrices (n=" << n << ") ===" << endl;
+    // for (int i = 0; i < 7; ++i)
+    // {
+    //     cout << "T[" << i << "]:" << endl;
+    //     for (int row = 0; row < half; ++row)
+    //     {
+    //         for (int col = 0; col < half; ++col)
+    //         {
+    //             cout << T[i][row * half + col];
+    //         }
+    //         cout << endl;
+    //     }
+    //     cout << endl;
+    // }
+
+    // ------------------- 计算 M 矩阵（递归调用）-------------------
+    for (int i = 0; i < 7; ++i)
+    {
+        ABMultiply(S[i], T[i], M[i], half, half, half, half);
+    }
+    // 打印 M 矩阵
+    // cout << "\n=== M Matrices (n=" << n << ") ===" << endl;
+    // for (int i = 0; i < 7; ++i)
+    // {
+    //     cout << "M[" << i << "]:" << endl;
+    //     for (int row = 0; row < half; ++row)
+    //     {
+    //         for (int col = 0; col < half; ++col)
+    //         {
+    //             cout << M[i][row * half + col];
+    //         }
+    //         cout << endl;
+    //     }
+    //     cout << endl;
+    // }
+
+    // ------------------- 构建 U 矩阵 -------------------
+    // U[0] = M[3] + M[4]
+    matrix_add(M[3], M[4], U[0], half, half, half, half);
+    // U[1] = (M[2] + M[4] - M[5]) + M[6]
+    double tmp1[half * half], tmp2[half * half];
+    matrix_add(M[2], M[4], tmp1, half, half, half, half);
+    matrix_sub(tmp1, M[5], tmp2, half, half, half, half);
+    matrix_add(tmp2, M[6], U[1], half, half, half, half);
+    // U[2] = M[1] + M[6]
+    matrix_add(M[1], M[6], U[2], half, half, half, half);
+    // U[3] = M[0] - M[5]
+    matrix_sub(M[0], M[5], U[3], half, half, half, half);
+
+    // 打印 U 矩阵
+    // cout << "\n=== U Matrices (n=" << n << ") ===" << endl;
+    // for (int i = 0; i < 4; ++i)
+    // {
+    //     cout << "U[" << i << "]:" << endl;
+    //     for (int row = 0; row < half; ++row)
+    //     {
+    //         for (int col = 0; col < half; ++col)
+    //         {
+    //             cout << U[i][row * half + col];
+    //         }
+    //         cout << endl;
+    //     }
+    //     cout << endl;
+    // }
+
+    // ------------------- 合并子块到结果矩阵 C -------------------
+    for (int i = 0; i < half; ++i)
+    {
+        for (int j = 0; j < half; ++j)
+        {
+            // 左上块 C11
+            C11[i * strideC + j] = U[0][i * half + j];
+            // 右上块 C12
+            C12[i * strideC + j] = U[1][i * half + j];
+            // 左下块 C21
+            C21[i * strideC + j] = U[2][i * half + j];
+            // 右下块 C22
+            C22[i * strideC + j] = U[3][i * half + j];
+        }
     }
 
-    int new_size = n / 2;
-
-    // 分割矩阵
-    std::vector<Matrix> A_blocks = splitMatrix(A);
-    std::vector<Matrix> B_blocks = splitMatrix(B);
-
-    Matrix A11 = A_blocks[0];
-    Matrix A12 = A_blocks[1];
-    Matrix A21 = A_blocks[2];
-    Matrix A22 = A_blocks[3];
-
-    Matrix B11 = B_blocks[0];
-    Matrix B12 = B_blocks[1];
-    Matrix B21 = B_blocks[2];
-    Matrix B22 = B_blocks[3];
-
-    // 计算S
-    std::vector<Matrix> S(7);
-    S[0] = A22;
-    S[1] = A21;
-    S[2] = A12;
-    S[3] = A11;
-    S[4] = matrixSub(A12, A21);
-    S[5] = matrixSub(A12, A11);
-    S[6] = matrixSub(A22, A12);
-
-    // 计算T
-    std::vector<Matrix> T(7);
-    T[0] = B22;
-    T[1] = B21;
-    T[2] = B12;
-    T[3] = B11;
-    T[4] = matrixSub(B22, B12);
-    T[5] = matrixSub(B12, B21);
-    T[6] = matrixSub(B12, B11);
-
-    // 计算M
-    std::vector<Matrix> M(8);
-    for (int i = 0; i < 7; i++)
-    {
-        M[i] = ABMultiply(S[i], T[i]);
-    }
-
-    // 计算U
-    /*
-    U[1]=M[4]+M[5], U[2]=M[3]+M[5]-M[6]+M[7], U[3]=M[2]+M[7], U[4]=M[1]-M[6]
-    */
-    std::vector<Matrix> U(4);
-    U[0] = matrixAdd(M[3], M[4]);
-    U[1] = matrixAdd(matrixSub(matrixAdd(M[2], M[4]), M[5]), M[6]);
-    U[2] = matrixAdd(M[1], M[6]);
-    U[3] = matrixSub(M[0], M[5]);
-
-    Matrix C = mergeMatrix(U);
-    return C;
+    // 打印当前层级计算结果（可选）
+    // cout << "\nABMultiply (n=" << n << ") intermediate result:" << endl;
+    // print_matrix(C, strideC, n, n);
 }
 
-Matrix wrapMultiply(const Matrix &A, const Matrix &B)
+void Multiply(double *A, double *B, double *C, int strideA, int strideB, int strideC, int n)
 {
-    int dim = A.size();
-    int depth = int(sqrt(dim));
+    // 1. 构造 A, B, C 的 4 子块指针（for basis_transform）
+    double *A_parts[4];
+    double *B_parts[4];
+    double *C_parts[4];
+    // std::cout << "Original A matrix:" << std::endl;
+    // print_matrix(A, strideA, n, n);
+    // std::cout << "Original B matrix:" << std::endl;
+    // print_matrix(B, strideB, n, n);
+    split_block(A, A_parts, strideA, n, n);
+    split_block(B, B_parts, strideB, n, n);
+    split_block(C, C_parts, strideC, n, n);
 
-    // phi transformation
-    Matrix A_phi = basis_transformation(A, depth);
-    Matrix B_phi = basis_transformation(B, depth);
-    // multiply
-    Matrix C_phi = ABMultiply(A_phi, B_phi);
-    // psi inverse transformation
-    Matrix C = inverse_basis_transformation(C_phi, depth);
+    // 2. 分配中间 buffer 作为 A', B' 的基变换结果
+    double Ap[n * n], Bp[n * n];
+    double *Ap_parts[4];
+    double *Bp_parts[4];
+    split_block(Ap, Ap_parts, n, n, n);
+    split_block(Bp, Bp_parts, n, n, n);
 
-    return C;
+    // 3. 执行基变换
+    recursive_basis_transform(A_parts, Ap_parts, strideA, n, n, n);
+    recursive_basis_transform(B_parts, Bp_parts, strideB, n, n, n);
+
+    // 4. 执行主乘法
+    ABMultiply(Ap, Bp, C, n, n, strideC, n);
+
+    // 5. 执行逆基变换
+    split_block(C, C_parts, strideC, n, n);
+    double Cp[n * n];
+    double *Cp_parts[4];
+    split_block(Cp, Cp_parts, n, n, n);
+    std::memcpy(Cp, C, sizeof(Cp)); // 复制 C 作为输入
+
+    inv_recursive_basis_transform(Cp_parts, C_parts, n, strideC, n, n);
+    // std::cout << "Final C matrix:" << std::endl;
+    // print_matrix(C, strideC, n, n);
+}
+
+int compare_matrix(double *A, double *B, int size)
+{
+    for (int i = 0; i < size; ++i)
+    {
+        if (fabs(A[i] - B[i]) > EPSILON)
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void copy_matrix(double *src, double *dst, int size)
+{
+    memcpy(dst, src, sizeof(double) * size);
+}
+
+#include <iostream>
+
+// 假设前面的函数定义都存在
+
+int main()
+{
+    int n = 256;
+    double A[n * n], B[n * n], C[n * n];
+
+    // 初始化矩阵 A 和 B，值为 1 - 16
+    for (int i = 0; i < n * n; ++i)
+    {
+        A[i] = static_cast<double>(i + 1);
+        B[i] = static_cast<double>(i + 1);
+    }
+
+    // std::cout << "Matrix A:" << std::endl;
+    // print_matrix(A, n, n, n);
+
+    // std::cout << "Matrix B:" << std::endl;
+    // print_matrix(B, n, n, n);
+
+    // 测量 Multiply 函数的计算时间
+    auto start1 = std::chrono::high_resolution_clock::now();
+    // 调用乘法函数进行计算
+    Multiply(A, B, C, n, n, n, n);
+    auto end1 = std::chrono::high_resolution_clock::now();
+    auto duration1 = std::chrono::duration_cast<std::chrono::microseconds>(end1 - start1).count();
+
+    // std::cout << "Result Matrix C:" << std::endl;
+    // print_matrix(C, n, n, n);
+
+    // 使用 naive_mul 进行验证
+    double C_naive[n * n];
+    // 测量 naive_mul 函数的计算时间
+    auto start2 = std::chrono::high_resolution_clock::now();
+    naive_mul(A, B, C_naive, n, n, n, n);
+    auto end2 = std::chrono::high_resolution_clock::now();
+    auto duration2 = std::chrono::duration_cast<std::chrono::microseconds>(end2 - start2).count();
+
+    // std::cout << "Result Matrix C_naive:" << std::endl;
+    // print_matrix(C_naive, n, n, n);
+
+    // 比较结果
+    if (compare_matrix(C, C_naive, n * n))
+    {
+        std::cout << "Result is correct." << std::endl;
+    }
+
+    // 输出计算时间
+    std::cout << "Multiply function took " << duration1 << " microseconds." << std::endl;
+    std::cout << "naive_mul function took " << duration2 << " microseconds." << std::endl;
+
+    return 0;
 }
